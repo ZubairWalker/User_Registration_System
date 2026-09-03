@@ -1,0 +1,29 @@
+{
+  "name": "user_registration_system",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "Walker",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "devStart": "nodemon --watch src --ext ts --exec \"npm run build && node dist/index.js\""
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "nodemon": "^3.1.14"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.4.1",
+    "install": "^0.13.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^7.0.2"
+  }
+}

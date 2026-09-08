@@ -1,5 +1,5 @@
 import express from 'express';
-import { getUserProfile, getUserIdFromAuthToken, loginUser, registerUser, updateUserProfile, verifyEmail, } from '../services/registrationService.js';
+import { getUserProfile, getUserIdFromAuthToken, loginUser, registerUser, updateUserProfile, verifyEmail, resendVerificationEmail } from '../services/registrationService.js';
 const authRouter = express.Router();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function requireAuthentication(req, res, next) {
@@ -13,11 +13,6 @@ function requireAuthentication(req, res, next) {
     res.locals.userId = userId;
     next();
 }
-function handleError(error, res) {
-    const message = error instanceof Error ? error.message : 'Something went wrong';
-    const status = message.includes('already exists') ? 409 : 400;
-    res.status(status).json({ message });
-}
 function validateRegistration(body) {
     if (typeof body.fullName !== 'string' || body.fullName.trim().length < 3) {
         return 'Full name must be at least 3 characters long';
@@ -30,7 +25,7 @@ function validateRegistration(body) {
     }
     return null;
 }
-authRouter.post('/register', async (req, res) => {
+authRouter.post('/register', async (req, res, next) => {
     const error = validateRegistration(req.body);
     if (error) {
         res.status(400).json({ message: error });
@@ -41,10 +36,10 @@ authRouter.post('/register', async (req, res) => {
         res.status(201).json({ message: 'Registration successful. Check your email to verify your account.', user });
     }
     catch (registrationError) {
-        handleError(registrationError, res);
+        next(registrationError);
     }
 });
-authRouter.get('/verify-email', async (req, res) => {
+authRouter.get('/verify-email', async (req, res, next) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     if (!token) {
         res.status(400).json({ message: 'Verification token is required' });
@@ -55,10 +50,23 @@ authRouter.get('/verify-email', async (req, res) => {
         res.json({ message: 'Email verified successfully', user });
     }
     catch (verificationError) {
-        handleError(verificationError, res);
+        next(verificationError);
     }
 });
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/resend-verification', async (req, res, next) => {
+    try {
+        if (typeof req.body.email !== 'string' || !emailPattern.test(req.body.email.trim())) {
+            res.status(400).json({ message: 'Please enter a valid email address' });
+            return;
+        }
+        await resendVerificationEmail(req.body.email);
+        res.json({ message: 'If an account exists, a verification email has been sent.' });
+    }
+    catch (error) {
+        next(error);
+    }
+});
+authRouter.post('/login', async (req, res, next) => {
     if (typeof req.body.email !== 'string' || typeof req.body.password !== 'string') {
         res.status(400).json({ message: 'Email and password are required' });
         return;
@@ -68,7 +76,16 @@ authRouter.post('/login', async (req, res) => {
         res.json({ message: 'Login successful', ...loginResult });
     }
     catch (loginError) {
-        res.status(401).json({ message: loginError instanceof Error ? loginError.message : 'Login failed' });
+        if (loginError instanceof Error && loginError.message.includes('verify')) {
+            const err = new Error(loginError.message);
+            err.status = 403;
+            next(err);
+        }
+        else {
+            const err = new Error(loginError instanceof Error ? loginError.message : 'Login failed');
+            err.status = 401;
+            next(err);
+        }
     }
 });
 authRouter.get('/profile/:id', requireAuthentication, async (req, res, next) => {

@@ -19,7 +19,11 @@ function hashToken(token) {
     return crypto.createHash('sha256').update(token).digest('hex');
 }
 function getAuthSecret() {
-    return process.env.AUTH_SECRET || 'development-secret-change-me';
+    const secret = process.env.AUTH_SECRET;
+    if (!secret) {
+        throw new Error('AUTH_SECRET environment variable is required');
+    }
+    return secret;
 }
 export function createAuthToken(userId) {
     const payload = Buffer.from(JSON.stringify({ userId, expiresAt: Date.now() + TOKEN_LIFETIME_MS })).toString('base64url');
@@ -93,11 +97,39 @@ export async function getUserProfile(id) {
     return user ? toPublicUser(user) : null;
 }
 export async function updateUserProfile(id, changes) {
-    const update = {};
-    if (changes.fullName !== undefined)
-        update.fullName = changes.fullName.trim();
-    if (changes.email !== undefined)
-        update.email = changes.email.trim().toLowerCase();
-    const user = await User.findByIdAndUpdate(id, update, { new: true, runValidators: true });
+    const user = await User.findById(id);
+    if (!user)
+        return null;
+    if (changes.fullName !== undefined) {
+        user.fullName = changes.fullName.trim();
+    }
+    if (changes.email !== undefined) {
+        const newEmail = changes.email.trim().toLowerCase();
+        if (newEmail !== user.email) {
+            const existing = await User.findOne({ email: newEmail });
+            if (existing) {
+                const error = new Error('An account with this email already exists');
+                error.status = 409;
+                throw error;
+            }
+            user.email = newEmail;
+            user.isVerified = false;
+            const verificationToken = createToken();
+            user.verificationTokenHash = hashToken(verificationToken);
+            user.verificationTokenExpiry = new Date(Date.now() + TOKEN_LIFETIME_MS);
+            await sendVerificationEmail(newEmail, verificationToken);
+        }
+    }
+    await user.save();
     return user ? toPublicUser(user) : null;
+}
+export async function resendVerificationEmail(email) {
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    if (!user)
+        return;
+    if (user.isVerified) {
+        const err = new Error('Email is already verified');
+        err.status = 400;
+        throw err;
+    }
 }

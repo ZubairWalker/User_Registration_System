@@ -89,12 +89,14 @@ export async function registerUser(input: RegisterInput): Promise<PublicUser> {
 
     const passwordHash = await bcrypt.hash(input.password, PASSWORD_ROUNDS);
     const verificationToken = createToken();
+    const now = new Date();
     const user = await User.create({
         fullName,
         email,
         passwordHash,
         verificationTokenHash: hashToken(verificationToken),
-        verificationTokenExpiry: new Date(Date.now() + TOKEN_LIFETIME_MS),
+        verificationTokenExpiry: new Date(now.getTime() + TOKEN_LIFETIME_MS),
+        lastVerificationSentAt: now,
     });
 
     await sendVerificationEmail(email, verificationToken);
@@ -162,6 +164,7 @@ export async function updateUserProfile(
             const verificationToken = createToken();
             user.verificationTokenHash = hashToken(verificationToken);
             user.verificationTokenExpiry = new Date(Date.now() + TOKEN_LIFETIME_MS);
+            user.lastVerificationSentAt = new Date();
             await sendVerificationEmail(newEmail, verificationToken);
         }
     }
@@ -169,12 +172,38 @@ export async function updateUserProfile(
     return user ? toPublicUser(user) : null;
 }
 
-export async function resendVerificationEmail(email: string): Promise<void> {
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+const RESEND_COOLDOWN_MS = 60 * 1000;
+
+export async function resendVerificationEmail(
+    input: string | { email: string; cooldownMs?: number },
+    overrideCooldownMs?: number
+): Promise<void> {
+    const rawEmail = typeof input === 'string' ? input : input?.email;
+    if (!rawEmail || typeof rawEmail !== 'string') return;
+    const email = rawEmail.trim().toLowerCase();
+
+    const cooldown = typeof input === 'object' && input.cooldownMs !== undefined
+        ? input.cooldownMs
+        : (overrideCooldownMs !== undefined ? overrideCooldownMs : RESEND_COOLDOWN_MS);
+
+    // 1. Look up, and stay quiet about what you find. Return void on every non-happy path
+    const user = await User.findOne({ email });
     if (!user) return;
-    if (user.isVerified) {
-        const err = new Error('Email is already verified');
-        (err as any).status = 400;
-        throw err;
+    if (user.isVerified) return;
+
+    // Cooldown check (too soon)
+    if (user.lastVerificationSentAt && Date.now() - user.lastVerificationSentAt.getTime() < cooldown) {
+        return;
     }
+
+    // 2. Issue a fresh token, don't reuse the old one
+    const verificationToken = createToken();
+    user.verificationTokenHash = hashToken(verificationToken);
+    user.verificationTokenExpiry = new Date(Date.now() + TOKEN_LIFETIME_MS);
+    user.lastVerificationSentAt = new Date();
+
+    // 3. Save before sending
+    await user.save();
+
+    await sendVerificationEmail(user.email, verificationToken);
 }

@@ -10,7 +10,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test dist/**/*.test.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
     "devStart": "nodemon --watch src --ext ts --exec \"npm run build && node dist/index.js\""
   },
   "dependencies": {

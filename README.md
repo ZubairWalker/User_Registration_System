@@ -153,8 +153,4 @@ Build the project with:
 npm run build
 ```
 
-Run the automated test suite with:
-
-```bash
-npm test
-```
+The project currently does not include automated tests yet.
